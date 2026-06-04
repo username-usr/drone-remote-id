@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>drone remote -id amrita - Local UAS Telemetry Command</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Leaflet CDN Linkage -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <link rel="stylesheet" href="styles.css">
+  
+  <!-- Leaflet Javascript Library -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- Firebase Compat SDKs (Enables running locally via file:// protocol without ES Module CORS errors) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+  <!-- Sticky Global Command Navigation Bar -->
+  <header class="app-header">
+    <div class="header-branding">
+      <h1>drone remote -id <span class="logo-accent">amrita</span> <span class="header-sub">Local UAS RF Node</span></h1>
+    </div>
+    
+    <!-- Floating Hardware Scanner Module Radio Controls -->
+    <div class="hardware-modules-dock">
+      <span class="module-dock-title">Hardware Receivers:</span>
+      <div class="toggle-group-wrapper">
+        <label class="switch-control-label">
+          <input type="checkbox" id="radio-toggle-ble" checked onchange="toggleReceiverInterface('BLE_ADV')">
+          <span class="custom-switch-slider"></span>
+          <span class="switch-title">BLE Scanner</span>
+        </label>
+        <label class="switch-control-label">
+          <input type="checkbox" id="radio-toggle-wifi" checked onchange="toggleReceiverInterface('WIFI_BEACON')">
+          <span class="custom-switch-slider"></span>
+          <span class="switch-title">Wi-Fi Scanner</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="system-diagnostics">
+      <div class="diagnostic-pill">
+        <span class="label">Downlink:</span>
+        <span id="backend-context-val" class="value text-muted">DISCONNECTED</span>
+      </div>
+      <div class="diagnostic-pill">
+        <span class="label">Firebase:</span>
+        <span id="firebase-status-val" class="value" style="color: var(--state-offline);">OFFLINE</span>
+      </div>
+      <div class="diagnostic-pill">
+        <span class="label">Local Signals:</span>
+        <span id="target-counter-val" class="value text-dark">0</span>
+      </div>
+      <div id="conn-status-badge" class="status-badge status-offline">Downlink Offline</div>
+    </div>
+  </header>
+
+  <!-- Tab Controller Sub-Header -->
+  <nav class="tab-navigation-bar">
+    <button id="tab-live-btn" class="navigation-tab active" onclick="switchWorkspaceTab('live')">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>
+      Tactical Radar Display
+    </button>
+    <button id="tab-archive-btn" class="navigation-tab" onclick="switchWorkspaceTab('archive')">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+      Database Query Archive
+    </button>
+  </nav>
+
+  <main class="dashboard-viewport">
+    
+    <!-- Map Section (Visible globally across tabs for tracking continuity) -->
+    <section class="map-viewport-wrapper">
+      <div id="map-canvas"></div>
+      <div class="floating-map-dock">
+        <button id="btn-clear-stale" class="dock-action-btn">Flush Offline Signals</button>
+      </div>
+    </section>
+
+    <!-- TAB 1: Live Radar Command Workspace -->
+    <section id="workspace-tab-live" class="workspace-panel">
+      <div class="directory-list-wrapper">
+        <div class="directory-section-header">
+          <h2>Active Local UAS Signal Registry</h2>
+          <p>Short-range telemetry decrypted over direct RF broadcast networks (Wi-Fi & BLE). Select rows to focus geographic tracks.</p>
+        </div>
+        
+        <div id="drone-accordion-container" class="drone-accordion-stack">
+          <div id="empty-state-placeholder" class="directory-empty-state">
+            <div class="pulse-loader"></div>
+            <p>Awaiting local telemetry data stream from neighborhood receiver station...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: Historical Database Query Archive Workspace -->
+    <section id="workspace-tab-archive" class="workspace-panel hidden">
+      <div class="archive-view-wrapper">
+        <div class="directory-section-header">
+          <h2>UAS Database Telemetry Query Tool</h2>
+          <p>Retrieve historical air traffic logs recorded from nearby broadcasts. Refine metrics using signatures and signal criteria.</p>
+        </div>
+
+        <!-- Advanced Search Filter Panel -->
+        <div class="query-filters-panel">
+          <div class="search-input-group">
+            <input type="text" id="query-search-input" placeholder="Search by UAS ID, MAC, or Hex Pattern..." oninput="executeArchiveQuery()">
+          </div>
+          
+          <div class="filter-controls-grid">
+            <div class="filter-control">
+              <label for="filter-protocol">Protocol Type</label>
+              <select id="filter-protocol" onchange="executeArchiveQuery()">
+                <option value="ALL">All Protocols</option>
+                <option value="BLE_ADV">Bluetooth (BLE_ADV)</option>
+                <option value="WIFI_BEACON">Wi-Fi (WIFI_BEACON)</option>
+              </select>
+            </div>
+            
+            <div class="filter-control">
+              <label for="filter-rssi">Max Distance (Min RSSI)</label>
+              <select id="filter-rssi" onchange="executeArchiveQuery()">
+                <option value="-100">Show All (Down to -100 dBm)</option>
+                <option value="-80">Close Range Only (Above -80 dBm)</option>
+                <option value="-65">Immediate Proximity (Above -65 dBm)</option>
+              </select>
+            </div>
+
+            <div class="filter-control">
+              <label for="filter-drone">Target Drone ID</label>
+              <select id="filter-drone" onchange="executeArchiveQuery()">
+                <option value="ALL">All Drones</option>
+              </select>
+            </div>
+
+            <div class="filter-control-buttons">
+              <button class="action-btn-primary" onclick="exportQueryResultsCSV()">Export Query to CSV</button>
+              <button class="action-btn-secondary" onclick="clearLocalArchiveDb()">Clear Archive Logs</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- High-Density Telemetry Logs Database Table -->
+        <div class="historical-table-container">
+          <table class="archive-data-table">
+            <thead>
+              <tr>
+                <th>Uplink Epoch</th>
+                <th>UAS Identifier</th>
+                <th>Hardware MAC</th>
+                <th>Protocol</th>
+                <th>RSSI</th>
+                <th>Altitude</th>
+                <th>Speed</th>
+                <th>Coordinate (GCS)</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="archive-table-body">
+              <tr>
+                <td colspan="9" class="table-empty-row">No records stored inside current session index.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Load script safely as standard script (bypassing modules CORS restrictions) -->
+  <script src="app.js"></script>
+</body>
+</html>
