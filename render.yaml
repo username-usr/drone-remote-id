@@ -11,8 +11,7 @@ services:
         value: TEST
 
   # 2. The Frontend User Interface Dashboard
-  - type: web
+  - type: static
     name: drone-telemetry-ui
-    runtime: static
-    plan: free
-    staticPublishPath: ./
+    buildCommand: echo "No build step required"
+    publishDir: ./
