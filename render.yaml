@@ -10,9 +10,9 @@ services:
       - key: EXECUTION_MODE
         value: TEST
 
-  # 2. The Frontend User Interface Dashboard (Corrected Type Syntax)
+  # 2. The Frontend User Interface Dashboard
   - type: web
     name: drone-telemetry-ui
-    env: static
+    runtime: static
     plan: free
-    publishPath: ./
+    staticPublishPath: ./
