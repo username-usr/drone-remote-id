@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>drone remote-id amrita - Local UAV Telemetry Monitoring</title>
+  <title>drone remote -id amrita - Local UAS Telemetry Command</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -130,14 +130,6 @@
               </select>
             </div>
 
-            <div class="filter-control">
-              <label for="filter-rssi">Min RSSI</label>
-              <select id="filter-rssi" onchange="executeArchiveQuery()">
-                <option value="-100">All (−100 dBm)</option>
-                <option value="-80">Close (−80 dBm)</option>
-                <option value="-65">Nearby (−65 dBm)</option>
-              </select>
-            </div>
 
             <div class="filter-control">
               <label for="filter-drone">Drone ID</label>
@@ -162,7 +154,6 @@
                 <th>UAS ID</th>
                 <th>Protocol</th>
                 <th>Status</th>
-                <th>RSSI</th>
                 <th class="hide-on-mobile">Alt</th>
                 <th class="hide-on-mobile">Speed</th>
                 <th class="hide-on-mobile">Pitch</th>
@@ -173,7 +164,7 @@
             </thead>
             <tbody id="archive-table-body">
               <tr>
-                <td colspan="11" class="table-empty-row">No records in current session.</td>
+                <td colspan="10" class="table-empty-row">No records in current session.</td>
               </tr>
             </tbody>
           </table>
