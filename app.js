@@ -275,11 +275,38 @@ function initDatabaseTelemetryListener() {
             const histPacket = rawData.logs[pushKey];
             if (!histPacket) return;
 
-            // logs entries may have a numeric timestamp or be missing one
-            const histTs = histPacket.timestamp || histPacket.last_seen_epoch || Date.now();
-            const parsedHistTimestamp = (histTs && typeof histTs.toMillis === 'function')
-              ? histTs.toMillis()
-              : (histTs && typeof histTs.toDate === 'function' ? histTs.toDate().getTime() : (Number(histTs) || Date.now()));
+            // Robust timestamp resolution — priority order:
+            // 1. histPacket.timestamp (Firebase ServerValue.TIMESTAMP = ms integer, or hardware seconds)
+            // 2. histPacket.last_seen_epoch (fallback field)
+            // 3. Decode the Firebase push key itself (always encodes creation time reliably)
+            // 4. Last resort: Date.now() — only if push key decode also fails
+            let parsedHistTimestamp;
+            const rawTs = histPacket.timestamp || histPacket.last_seen_epoch;
+
+            if (rawTs && typeof rawTs.toMillis === 'function') {
+              // Firestore Timestamp object
+              parsedHistTimestamp = rawTs.toMillis();
+            } else if (rawTs && typeof rawTs.toDate === 'function') {
+              parsedHistTimestamp = rawTs.toDate().getTime();
+            } else if (rawTs && Number(rawTs) > 0) {
+              const n = Number(rawTs);
+              // If value looks like seconds (< year 2100 in seconds = 4102444800),
+              // convert to ms; otherwise treat as already milliseconds
+              parsedHistTimestamp = n < 4102444800 ? n * 1000 : n;
+            } else {
+              // Decode creation time from Firebase push key (format: base64-like, first 8 chars = ms)
+              // Push key chars map to 6-bit values via a known alphabet
+              try {
+                const PUSH_CHARS = '-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
+                let timeMs = 0;
+                for (let i = 0; i < 8; i++) {
+                  timeMs = timeMs * 64 + PUSH_CHARS.indexOf(pushKey[i]);
+                }
+                parsedHistTimestamp = timeMs > 0 ? timeMs : Date.now();
+              } catch {
+                parsedHistTimestamp = Date.now();
+              }
+            }
 
             // logs entries use 'altitude' (not altitude_feet) and 'speed' (not speed_mph)
             const histLat = typeof histPacket.latitude === 'number' ? histPacket.latitude : Number(histPacket.lat || 0);
@@ -502,18 +529,22 @@ async function throttleAndPersistLog(data) {
     drone_id: data.drone_id,
     mac_address: data.mac_address,
     protocol: data.protocol,
-    rssi: Number(data.rssi),
     latitude: Number(data.latitude),
     longitude: Number(data.longitude),
     altitude_feet: Number(data.altitude_feet),
     speed_mph: Number(data.speed_mph),
     heading: Number(data.heading),
     payload_hex: data.payload_hex,
-    timestamp: now
+    // Use Firebase server timestamp so every log entry gets the true
+    // server-side write time, not the browser clock (avoids all-same-time bug)
+    timestamp: firebase.database.ServerValue.TIMESTAMP
   };
 
-  // Push to local list for immediate visual update
-  localArchiveLogs.unshift(telemetryRecord);
+  // For immediate local display, tag with browser time (close enough)
+  const localRecord = { ...telemetryRecord, timestamp: now };
+
+  // Push to local list for immediate visual update (uses browser timestamp)
+  localArchiveLogs.unshift(localRecord);
 
   // Cap local memory registry list at 100 entries for lightweight memory tracking
   if (localArchiveLogs.length > 100) localArchiveLogs.pop();
