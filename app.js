@@ -268,34 +268,46 @@ function initDatabaseTelemetryListener() {
           localArchiveLogs.push(normalizedPacket);
         }
 
-        // Also extract and add all points from 'history' node if present
-        if (rawData.history) {
-          Object.keys(rawData.history).forEach((pushKey) => {
-            const histPacket = rawData.history[pushKey];
+        // Also extract and add all points from 'logs' node if present
+        // Schema: /drones/{droneId}/logs/{pushKey} -> { altitude, droneId, heading, latitude, longitude, pitch, roll, satellites, speed, status, timestamp }
+        if (rawData.logs) {
+          Object.keys(rawData.logs).forEach((pushKey) => {
+            const histPacket = rawData.logs[pushKey];
             if (!histPacket) return;
 
+            // logs entries may have a numeric timestamp or be missing one
             const histTs = histPacket.timestamp || histPacket.last_seen_epoch || Date.now();
-            const parsedHistTimestamp = (histTs && typeof histTs.toMillis === 'function') 
-              ? histTs.toMillis() 
+            const parsedHistTimestamp = (histTs && typeof histTs.toMillis === 'function')
+              ? histTs.toMillis()
               : (histTs && typeof histTs.toDate === 'function' ? histTs.toDate().getTime() : (Number(histTs) || Date.now()));
 
+            // logs entries use 'altitude' (not altitude_feet) and 'speed' (not speed_mph)
+            const histLat = typeof histPacket.latitude === 'number' ? histPacket.latitude : Number(histPacket.lat || 0);
+            const histLng = typeof histPacket.longitude === 'number' ? histPacket.longitude : Number(histPacket.lng || 0);
+
+            // Skip entries with no valid GPS fix
+            if (histPacket.status === "NO_GPS" || (histLat === 0 && histLng === 0)) return;
+
             const normalizedHist = {
-              drone_id: droneId,
+              drone_id: histPacket.droneId || droneId,
               mac_address: histPacket.mac_address || histPacket.mac || "00:00:00:00:00:00",
-              protocol: histPacket.protocol || "BLE_ADV",
+              protocol: histPacket.protocol || normalizedPacket.protocol || "BLE_ADV",
               rssi: histPacket.rssi !== undefined ? Number(histPacket.rssi) : -70,
-              latitude: typeof histPacket.latitude === 'number' ? histPacket.latitude : Number(histPacket.lat || 12.9716),
-              longitude: typeof histPacket.longitude === 'number' ? histPacket.longitude : Number(histPacket.lng || 77.5946),
+              latitude: histLat,
+              longitude: histLng,
               altitude_feet: histPacket.altitude !== undefined ? Number(histPacket.altitude) : (histPacket.altitude_feet !== undefined ? Number(histPacket.altitude_feet) : 0),
               speed_mph: histPacket.speed !== undefined ? Number(histPacket.speed) : (histPacket.speed_mph !== undefined ? Number(histPacket.speed_mph) : 0),
               heading: histPacket.heading !== undefined ? Number(histPacket.heading) : 0,
+              // Extra fields from the real schema
+              pitch: histPacket.pitch !== undefined ? Number(histPacket.pitch) : null,
+              roll: histPacket.roll !== undefined ? Number(histPacket.roll) : null,
+              satellites: histPacket.satellites !== undefined ? Number(histPacket.satellites) : null,
+              status: histPacket.status || null,
               payload_hex: histPacket.payload_hex || histPacket.payload || "NO PAYLOAD",
               timestamp: parsedHistTimestamp
             };
 
-            if (receiverStatus[normalizedHist.protocol]) {
-              localArchiveLogs.push(normalizedHist);
-            }
+            localArchiveLogs.push(normalizedHist);
           });
         }
       });
@@ -478,8 +490,8 @@ async function throttleAndPersistLog(data) {
       if (USE_CUSTOM_FIREBASE && firebaseConfig.apiKey !== "YOUR_API_KEY" && rtdb) {
         // Update the current state of the drone
         await rtdb.ref(`${DATABASE_REF_NAME}/${droneId}/current`).set(telemetryRecord);
-        // Append the record to the history collection of that drone
-        await rtdb.ref(`${DATABASE_REF_NAME}/${droneId}/history`).push(telemetryRecord);
+        // Append the record to the logs collection of that drone (matches schema: /drones/{id}/logs)
+        await rtdb.ref(`${DATABASE_REF_NAME}/${droneId}/logs`).push(telemetryRecord);
       } else if (db) {
         // Firestore write
         const collectionRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('uas_telemetry_logs');
@@ -735,18 +747,31 @@ function executeArchiveQuery() {
 
   filteredLogs.forEach(log => {
     const row = document.createElement("tr");
-    const dateStr = new Date(log.timestamp).toLocaleTimeString();
+    const dateStr = new Date(log.timestamp).toLocaleString();
+
+    // Build extra-fields tooltip string from real Firebase schema fields
+    const extraParts = [];
+    if (log.pitch !== null && log.pitch !== undefined) extraParts.push(`Pitch: ${log.pitch}°`);
+    if (log.roll !== null && log.roll !== undefined) extraParts.push(`Roll: ${log.roll}°`);
+    if (log.satellites !== null && log.satellites !== undefined) extraParts.push(`Sats: ${log.satellites}`);
+    if (log.status) extraParts.push(`Status: ${log.status}`);
+    const extraTitle = extraParts.length ? extraParts.join(' | ') : '';
+
+    // Show GPS status badge if available from real schema
+    const statusBadge = log.status
+      ? `<span style="font-size:0.6rem;margin-left:0.3rem;padding:0.1rem 0.3rem;border-radius:3px;background:${log.status === 'NO_GPS' ? '#fce8e6' : '#e6f4ea'};color:${log.status === 'NO_GPS' ? '#dc2626' : '#16a34a'};border:1px solid ${log.status === 'NO_GPS' ? '#f5c2c2' : '#bbf7d0'};">${log.status}</span>`
+      : '';
 
     row.innerHTML = `
-      <td>${dateStr}</td>
+      <td class="mono-cell" style="font-size:0.72rem;">${dateStr}</td>
       <td class="mono-cell" style="font-weight:600;">${log.drone_id}</td>
-      <td class="mono-cell text-muted">${log.mac_address}</td>
-      <td><span class="protocol-badge">${log.protocol.replace('_', ' ')}</span></td>
+      <td class="mono-cell hide-on-mobile" style="color:var(--text-muted);">${log.mac_address}</td>
+      <td><span class="protocol-badge">${(log.protocol || 'BLE_ADV').replace('_', ' ')}</span>${statusBadge}</td>
       <td class="mono-cell">${log.rssi} dBm</td>
-      <td>${log.altitude_feet} ft</td>
-      <td>${log.speed_mph} mph</td>
-      <td class="mono-cell" style="font-size:0.75rem;">${log.latitude.toFixed(5)}, ${log.longitude.toFixed(5)}</td>
-      <td><button class="btn-tele-jump" onclick="teleJumpToCoordinate(${log.latitude}, ${log.longitude}, '${log.drone_id}')">Track Node</button></td>
+      <td class="hide-on-mobile">${log.altitude_feet} ft</td>
+      <td class="hide-on-mobile">${log.speed_mph} mph</td>
+      <td class="mono-cell hide-on-mobile" style="font-size:0.72rem;" title="${extraTitle}">${log.latitude.toFixed(5)}, ${log.longitude.toFixed(5)}${extraParts.length ? ' ⓘ' : ''}</td>
+      <td><button class="btn-tele-jump" onclick="teleJumpToCoordinate(${log.latitude}, ${log.longitude}, '${log.drone_id}')">Track</button></td>
     `;
     tbody.appendChild(row);
   });
