@@ -674,7 +674,7 @@ function injectAccordionRowDOM(node, data) {
   const protocolText = (data.protocol || "BLE_ADV").replace('_', ' ');
   const altText = data.altitude_feet !== undefined ? `${data.altitude_feet} ft` : '--';
   const spdText = data.speed_mph !== undefined ? `${data.speed_mph} mph` : '--';
-  const rssiText = data.rssi !== undefined ? `${data.rssi} dBm` : '--';
+
   const headingText = data.heading !== undefined ? `${data.heading}° N` : '--';
   const latText = typeof data.latitude === 'number' ? data.latitude.toFixed(5) : '--';
   const lngText = typeof data.longitude === 'number' ? data.longitude.toFixed(5) : '--';
@@ -697,10 +697,7 @@ function injectAccordionRowDOM(node, data) {
         <span class="metric-label">Groundspeed</span>
         <span class="metric-val row-spd-val">${spdText}</span>
       </div>
-      <div class="col-metric">
-        <span class="metric-label">Signal (RSSI)</span>
-        <span class="metric-val col-rssi row-rssi-val">${rssiText}</span>
-      </div>
+
       <div class="chevron-indicator">▼</div>
     </div>
     
@@ -724,7 +721,7 @@ function injectAccordionRowDOM(node, data) {
   `;
 
   container.appendChild(cardRow);
-  applySignalColorContext(cardRow.querySelector(".row-rssi-val"), data.rssi !== undefined ? data.rssi : -70);
+
 }
 
 function updateAccordionRowDOM(node, data) {
@@ -733,12 +730,6 @@ function updateAccordionRowDOM(node, data) {
 
   row.querySelector(".row-alt-val").innerText = data.altitude_feet !== undefined ? `${data.altitude_feet} ft` : '--';
   row.querySelector(".row-spd-val").innerText = data.speed_mph !== undefined ? `${data.speed_mph} mph` : '--';
-
-  const rssiField = row.querySelector(".row-rssi-val");
-  if (rssiField) {
-    rssiField.innerText = data.rssi !== undefined ? `${data.rssi} dBm` : '--';
-    applySignalColorContext(rssiField, data.rssi !== undefined ? data.rssi : -70);
-  }
 
   const hdgField = row.querySelector(".row-hdg-val");
   if (hdgField) hdgField.innerText = data.heading !== undefined ? `${data.heading}° N` : '--';
@@ -756,7 +747,6 @@ function updateAccordionRowDOM(node, data) {
 function executeArchiveQuery() {
   const searchStr = document.getElementById("query-search-input").value.toLowerCase().trim();
   const filterProtocol = document.getElementById("filter-protocol").value;
-  const filterRssiLimit = Number(document.getElementById("filter-rssi").value);
   const filterDrone = document.getElementById("filter-drone").value;
 
   const tbody = document.getElementById("archive-table-body");
@@ -770,14 +760,13 @@ function executeArchiveQuery() {
       log.payload_hex.toLowerCase().includes(searchStr);
 
     const matchesProtocol = filterProtocol === "ALL" || log.protocol === filterProtocol;
-    const matchesRssi = log.rssi >= filterRssiLimit;
     const matchesDrone = filterDrone === "ALL" || log.drone_id === filterDrone;
 
-    return matchesSearch && matchesProtocol && matchesRssi && matchesDrone;
+    return matchesSearch && matchesProtocol && matchesDrone;
   });
 
   if (filteredLogs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="11" class="table-empty-row">No records match the current search filters.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="table-empty-row">No records match the current search filters.</td></tr>`;
     return;
   }
 
@@ -798,7 +787,6 @@ function executeArchiveQuery() {
       <td class="mono-cell" style="font-weight:600;">${log.drone_id}</td>
       <td><span class="protocol-badge">${(log.protocol || 'BLE_ADV').replace('_', ' ')}</span></td>
       <td>${statusCell}</td>
-      <td class="mono-cell">${log.rssi} dBm</td>
       <td class="hide-on-mobile">${log.altitude_feet} ft</td>
       <td class="hide-on-mobile">${log.speed_mph} mph</td>
       <td class="mono-cell hide-on-mobile">${pitchVal}</td>
@@ -849,7 +837,7 @@ window.exportQueryResultsCSV = function () {
   }
 
   let csvContent = "data:text/csv;charset=utf-8,";
-  csvContent += "Timestamp,Drone ID,MAC Address,Protocol,RSSI,Altitude (ft),Speed (mph),Heading,Latitude,Longitude,Payload (Hex)\n";
+  csvContent += "Timestamp,Drone ID,Protocol,Status,Altitude (ft),Speed (mph),Pitch,Roll,Heading,Latitude,Longitude,Payload (Hex)\n";
 
   localArchiveLogs.forEach(log => {
     const rowStr = [
@@ -857,7 +845,6 @@ window.exportQueryResultsCSV = function () {
       log.drone_id,
       log.mac_address,
       log.protocol,
-      log.rssi,
       log.altitude_feet,
       log.speed_mph,
       log.heading,
@@ -946,12 +933,6 @@ window.toggleAccordionDrawer = function (droneId) {
   }
 };
 
-function applySignalColorContext(element, rssi) {
-  element.classList.remove("rssi-strong", "rssi-medium", "rssi-weak");
-  if (rssi >= -60) element.classList.add("rssi-strong");
-  else if (rssi >= -75) element.classList.add("rssi-medium");
-  else element.classList.add("rssi-weak");
-}
 
 function updateGlobalTelemetryCounters() {
   document.getElementById("target-counter-val").innerText = droneRegistry.size;
