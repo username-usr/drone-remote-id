@@ -378,7 +378,7 @@ function initDatabaseTelemetryListener() {
 }
 
 /**
- * Instantiates the Light-Themed Map Canvas Layer
+ * Instantiates the Light-Themed Map Canvas Layer, then requests user geolocation.
  */
 function initMapCanvas() {
   const localReceiverCenter = [12.9716, 77.5946];
@@ -386,7 +386,7 @@ function initMapCanvas() {
   map = L.map('map-canvas', {
     zoomControl: true,
     attributionControl: false
-  }).setView(localReceiverCenter, 15.5); // Stretched neighborhood focal point
+  }).setView(localReceiverCenter, 15.5);
 
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     maxZoom: 20
@@ -401,6 +401,42 @@ function initMapCanvas() {
     weight: 1.2,
     dashArray: "3, 5"
   }).addTo(map);
+
+  // Request user location, pan map to it and show a pulsing blue dot
+  if ("geolocation" in navigator) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const userLat = position.coords.latitude;
+        const userLng = position.coords.longitude;
+
+        map.setView([userLat, userLng], 15.5);
+
+        const userIcon = L.divIcon({
+          className: '',
+          html: `
+            <div style="position:relative;width:20px;height:20px;display:flex;align-items:center;justify-content:center;">
+              <div style="position:absolute;width:20px;height:20px;background:rgba(37,99,235,0.2);border-radius:50%;animation:user-ping 1.6s ease-out infinite;"></div>
+              <div style="position:absolute;width:10px;height:10px;background:#2563eb;border-radius:50%;border:2px solid #ffffff;box-shadow:0 0 0 2px rgba(37,99,235,0.4);z-index:2;"></div>
+            </div>
+            <style>@keyframes user-ping{0%{transform:scale(0.8);opacity:0.8}100%{transform:scale(2.4);opacity:0}}</style>
+          `,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+        });
+
+        L.marker([userLat, userLng], { icon: userIcon, zIndexOffset: 9999 })
+          .addTo(map)
+          .bindPopup('<b>Your Location</b><br>GCS Observer Position')
+          .openPopup();
+
+        console.log("User location acquired:", userLat.toFixed(5), userLng.toFixed(5));
+      },
+      (err) => {
+        console.warn("Geolocation denied or unavailable:", err.message);
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  }
 }
 
 /**
@@ -741,7 +777,7 @@ function executeArchiveQuery() {
   });
 
   if (filteredLogs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" class="table-empty-row">No records match the current search filters.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="table-empty-row">No records match the current search filters.</td></tr>`;
     return;
   }
 
@@ -749,28 +785,25 @@ function executeArchiveQuery() {
     const row = document.createElement("tr");
     const dateStr = new Date(log.timestamp).toLocaleString();
 
-    // Build extra-fields tooltip string from real Firebase schema fields
-    const extraParts = [];
-    if (log.pitch !== null && log.pitch !== undefined) extraParts.push(`Pitch: ${log.pitch}°`);
-    if (log.roll !== null && log.roll !== undefined) extraParts.push(`Roll: ${log.roll}°`);
-    if (log.satellites !== null && log.satellites !== undefined) extraParts.push(`Sats: ${log.satellites}`);
-    if (log.status) extraParts.push(`Status: ${log.status}`);
-    const extraTitle = extraParts.length ? extraParts.join(' | ') : '';
+    // Status column cell
+    const statusCell = log.status
+      ? `<span style="font-size:0.65rem;padding:0.1rem 0.35rem;border-radius:3px;background:${log.status === 'NO_GPS' ? '#fce8e6' : '#e6f4ea'};color:${log.status === 'NO_GPS' ? '#dc2626' : '#16a34a'};border:1px solid ${log.status === 'NO_GPS' ? '#f5c2c2' : '#bbf7d0'};font-family:var(--font-data);font-weight:600;">${log.status}</span>`
+      : '<span style="color:var(--text-dim);font-size:0.72rem;">—</span>';
 
-    // Show GPS status badge if available from real schema
-    const statusBadge = log.status
-      ? `<span style="font-size:0.6rem;margin-left:0.3rem;padding:0.1rem 0.3rem;border-radius:3px;background:${log.status === 'NO_GPS' ? '#fce8e6' : '#e6f4ea'};color:${log.status === 'NO_GPS' ? '#dc2626' : '#16a34a'};border:1px solid ${log.status === 'NO_GPS' ? '#f5c2c2' : '#bbf7d0'};">${log.status}</span>`
-      : '';
+    const pitchVal = (log.pitch !== null && log.pitch !== undefined) ? `${Number(log.pitch).toFixed(1)}°` : '—';
+    const rollVal  = (log.roll  !== null && log.roll  !== undefined) ? `${Number(log.roll ).toFixed(1)}°` : '—';
 
     row.innerHTML = `
       <td class="mono-cell" style="font-size:0.72rem;">${dateStr}</td>
       <td class="mono-cell" style="font-weight:600;">${log.drone_id}</td>
-      <td class="mono-cell hide-on-mobile" style="color:var(--text-muted);">${log.mac_address}</td>
-      <td><span class="protocol-badge">${(log.protocol || 'BLE_ADV').replace('_', ' ')}</span>${statusBadge}</td>
+      <td><span class="protocol-badge">${(log.protocol || 'BLE_ADV').replace('_', ' ')}</span></td>
+      <td>${statusCell}</td>
       <td class="mono-cell">${log.rssi} dBm</td>
       <td class="hide-on-mobile">${log.altitude_feet} ft</td>
       <td class="hide-on-mobile">${log.speed_mph} mph</td>
-      <td class="mono-cell hide-on-mobile" style="font-size:0.72rem;" title="${extraTitle}">${log.latitude.toFixed(5)}, ${log.longitude.toFixed(5)}${extraParts.length ? ' ⓘ' : ''}</td>
+      <td class="mono-cell hide-on-mobile">${pitchVal}</td>
+      <td class="mono-cell hide-on-mobile">${rollVal}</td>
+      <td class="mono-cell hide-on-mobile" style="font-size:0.72rem;">${log.latitude.toFixed(5)}, ${log.longitude.toFixed(5)}</td>
       <td><button class="btn-tele-jump" onclick="teleJumpToCoordinate(${log.latitude}, ${log.longitude}, '${log.drone_id}')">Track</button></td>
     `;
     tbody.appendChild(row);
